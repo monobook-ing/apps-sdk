@@ -1,9 +1,23 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
+import fs from "fs";
+
+const copyStaticAssetsPlugin = () => ({
+  name: "copy-static-assets",
+  closeBundle() {
+    const sourceDir = path.resolve(__dirname, "assets");
+    const targetDir = path.resolve(__dirname, "dist/apps/assets");
+
+    if (!fs.existsSync(sourceDir)) return;
+
+    fs.mkdirSync(targetDir, { recursive: true });
+    fs.cpSync(sourceDir, targetDir, { recursive: true, force: true });
+  },
+});
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), copyStaticAssetsPlugin()],
   define: {
     "process.env.NODE_ENV": JSON.stringify("production"),
   },
