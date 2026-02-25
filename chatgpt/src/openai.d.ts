@@ -5,6 +5,11 @@ export type SearchRoom = {
   type?: string;
   description?: string;
   price_per_night?: string | number;
+  currency_code?: string;
+  currency_display?: string;
+  estimated_total_price?: number;
+  estimated_total_price_currency_code?: string;
+  estimated_total_price_currency_display?: string;
   max_guests?: number;
   amenities?: string[];
   images?: string[];
@@ -13,6 +18,9 @@ export type SearchRoom = {
 export type SearchHotel = {
   property_id?: string;
   property_name?: string;
+  min_price_per_night?: number;
+  min_price_currency_code?: string;
+  min_price_currency_display?: string;
   matching_rooms?: SearchRoom[];
 };
 
