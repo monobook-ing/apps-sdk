@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type {
   OpenAIBridge,
+  SearchHotel,
   SearchRoom,
   SearchRoomsStructuredPayload,
 } from "../openai";
@@ -42,9 +43,26 @@ const parseJson = (value: string | null): unknown => {
 
 const hasSearchRoomsData = (value: Record<string, unknown>): boolean =>
   Object.prototype.hasOwnProperty.call(value, "rooms") ||
+  Object.prototype.hasOwnProperty.call(value, "hotels") ||
   Object.prototype.hasOwnProperty.call(value, "count") ||
   Object.prototype.hasOwnProperty.call(value, "property_name") ||
   Object.prototype.hasOwnProperty.call(value, "error");
+
+const flattenHotelsToRooms = (hotels: SearchHotel[] | undefined): SearchRoom[] => {
+  if (!hotels || hotels.length === 0) return [];
+
+  const rooms: SearchRoom[] = [];
+  for (const hotel of hotels) {
+    const hotelPropertyId = hotel.property_id;
+    for (const room of hotel.matching_rooms ?? []) {
+      rooms.push({
+        ...room,
+        property_id: room.property_id ?? hotelPropertyId,
+      });
+    }
+  }
+  return rooms;
+};
 
 const extractStructuredPayload = (
   payload: unknown
@@ -268,10 +286,40 @@ export function SearchRoomsWidget() {
     };
   }, [loadBridgePayload, payload]);
 
-  const rooms = useMemo(() => payload?.rooms ?? [], [payload]);
-  const count = typeof payload?.count === "number" ? payload.count : rooms.length;
-  const propertyName =
-    payload?.property_name?.trim() || "Selected property";
+  const rooms = useMemo(() => {
+    if (Array.isArray(payload?.rooms) && payload.rooms.length > 0) {
+      return payload.rooms;
+    }
+    return flattenHotelsToRooms(payload?.hotels);
+  }, [payload]);
+
+  const hotelCount = useMemo(() => {
+    if (typeof payload?.count_hotels === "number") return payload.count_hotels;
+    return payload?.hotels?.length ?? 0;
+  }, [payload]);
+
+  const count = useMemo(() => {
+    if (typeof payload?.count === "number") return payload.count;
+    if (typeof payload?.count_rooms === "number") return payload.count_rooms;
+    return rooms.length;
+  }, [payload, rooms.length]);
+
+  const titleText = useMemo(() => {
+    if (hotelCount > 1) {
+      return `${count} rooms across ${hotelCount} hotels`;
+    }
+
+    if (hotelCount === 1) {
+      const hotelName =
+        payload?.hotels?.[0]?.property_name?.trim() ||
+        payload?.property_name?.trim() ||
+        "Selected hotel";
+      return `${count} rooms at ${hotelName}`;
+    }
+
+    const propertyName = payload?.property_name?.trim() || "Selected property";
+    return `${count} rooms at ${propertyName}`;
+  }, [count, hotelCount, payload]);
 
   const onBookNow = useCallback(
     (room: SearchRoom) => {
@@ -279,7 +327,11 @@ export function SearchRoomsWidget() {
       const detail = {
         room_id: room.id,
         room_name: room.name,
-        property_id: room.property_id ?? payload?.property_id ?? null,
+        property_id:
+          room.property_id ??
+          payload?.property_id ??
+          payload?.hotels?.[0]?.property_id ??
+          null,
       };
 
       window.dispatchEvent(
@@ -294,7 +346,7 @@ export function SearchRoomsWidget() {
         // Keep UI responsive even if parent messaging is unavailable.
       }
     },
-    [payload?.property_id]
+    [payload?.hotels, payload?.property_id]
   );
 
   return (
@@ -319,7 +371,7 @@ export function SearchRoomsWidget() {
         {!loading && !payload?.error && (
           <>
             <h2 className="rooms-widget__title">
-              {count} rooms at {propertyName}
+              {titleText}
             </h2>
 
             {rooms.length === 0 ? (

@@ -10,11 +10,20 @@ export type SearchRoom = {
   images?: string[];
 };
 
+export type SearchHotel = {
+  property_id?: string;
+  property_name?: string;
+  matching_rooms?: SearchRoom[];
+};
+
 export type SearchRoomsStructuredPayload = {
   property_id?: string;
   property_name?: string;
   rooms?: SearchRoom[];
+  hotels?: SearchHotel[];
   count?: number;
+  count_hotels?: number;
+  count_rooms?: number;
   message?: string;
   error?: string;
 };
