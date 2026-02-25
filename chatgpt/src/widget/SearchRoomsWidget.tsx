@@ -21,7 +21,20 @@ const BRIDGE_METHODS = [
   "getToolOutput",
 ] as const;
 
-const MAX_BRIDGE_ATTEMPTS = 40;
+const BRIDGE_STATIC_KEYS = [
+  "toolOutput",
+  "output",
+  "data",
+  "result",
+  "response",
+  "toolResult",
+  "tool_output",
+  "tool_result",
+  "state",
+  "value",
+] as const;
+
+const MAX_BRIDGE_ATTEMPTS = 80;
 const BRIDGE_POLL_INTERVAL_MS = 100;
 
 type BootstrapData = {
@@ -39,6 +52,15 @@ const parseJson = (value: string | null): unknown => {
   } catch {
     return null;
   }
+};
+
+const coerceToRecord = (value: unknown): Record<string, unknown> | null => {
+  if (isRecord(value)) return value;
+  if (typeof value === "string") {
+    const parsed = parseJson(value);
+    if (isRecord(parsed)) return parsed;
+  }
+  return null;
 };
 
 const hasSearchRoomsData = (value: Record<string, unknown>): boolean =>
@@ -67,23 +89,31 @@ const flattenHotelsToRooms = (hotels: SearchHotel[] | undefined): SearchRoom[] =
 const extractStructuredPayload = (
   payload: unknown
 ): SearchRoomsStructuredPayload | null => {
-  if (!isRecord(payload)) return null;
+  const record = coerceToRecord(payload);
+  if (!record) return null;
 
-  const maybeStructured = payload.structuredContent;
-  if (isRecord(maybeStructured)) {
+  const maybeStructured = coerceToRecord(record.structuredContent);
+  if (maybeStructured) {
     return maybeStructured as SearchRoomsStructuredPayload;
   }
 
-  for (const key of ["result", "output"]) {
-    const nested = payload[key];
-    if (isRecord(nested)) {
-      const extracted = extractStructuredPayload(nested);
-      if (extracted) return extracted;
-    }
+  for (const key of [
+    "result",
+    "output",
+    "data",
+    "response",
+    "toolResult",
+    "tool_result",
+    "toolOutput",
+    "tool_output",
+    "value",
+  ]) {
+    const extracted = extractStructuredPayload(record[key]);
+    if (extracted) return extracted;
   }
 
-  if (Array.isArray(payload.content)) {
-    for (const item of payload.content) {
+  if (Array.isArray(record.content)) {
+    for (const item of record.content) {
       if (!isRecord(item)) continue;
       const text = item.text;
       if (typeof text !== "string") continue;
@@ -93,11 +123,25 @@ const extractStructuredPayload = (
     }
   }
 
-  if (hasSearchRoomsData(payload)) {
-    return payload as SearchRoomsStructuredPayload;
+  if (hasSearchRoomsData(record)) {
+    return record as SearchRoomsStructuredPayload;
+  }
+
+  for (const value of Object.values(record)) {
+    const nested = coerceToRecord(value);
+    if (!nested) continue;
+    if (hasSearchRoomsData(nested)) {
+      return nested as SearchRoomsStructuredPayload;
+    }
   }
 
   return null;
+};
+
+const describeCandidateType = (value: unknown): string => {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return `array(${value.length})`;
+  return typeof value;
 };
 
 const bootstrapPayloadFromScript = (): SearchRoomsStructuredPayload | null => {
@@ -231,23 +275,58 @@ export function SearchRoomsWidget() {
 
   const loadBridgePayload = useCallback(async (): Promise<SearchRoomsStructuredPayload | null> => {
     const bridge = window.openai as OpenAIBridge | undefined;
-    if (!bridge) return null;
+    if (!bridge) {
+      console.warn("[SearchRoomsWidget] OpenAI bridge not found on window.");
+      return null;
+    }
 
-    const candidates: unknown[] = [bridge.toolOutput, bridge.output];
+    const bridgeRecord = bridge as Record<string, unknown>;
+    const candidates: unknown[] = [];
+    const seen = new Set<unknown>();
+
+    const addCandidate = (value: unknown) => {
+      if (typeof value === "undefined") return;
+      if (seen.has(value)) return;
+      seen.add(value);
+      candidates.push(value);
+    };
+
+    for (const key of BRIDGE_STATIC_KEYS) {
+      addCandidate(bridgeRecord[key]);
+    }
+
     for (const methodName of BRIDGE_METHODS) {
       const method = bridge[methodName];
       if (typeof method !== "function") continue;
       try {
-        candidates.push(await method.call(bridge));
+        addCandidate(await method.call(bridge));
       } catch {
         // Bridge methods can be absent/fail depending on host lifecycle.
       }
     }
 
+    for (const [key, value] of Object.entries(bridgeRecord)) {
+      if (key.startsWith("_")) continue;
+      if (typeof value === "function") continue;
+      if (BRIDGE_STATIC_KEYS.includes(key as (typeof BRIDGE_STATIC_KEYS)[number])) {
+        continue;
+      }
+      addCandidate(value);
+    }
+
+    console.warn(
+      `[SearchRoomsWidget] Evaluating ${candidates.length} bridge candidates.`,
+      candidates.map((candidate) => describeCandidateType(candidate))
+    );
+
     for (const candidate of candidates) {
       const extracted = extractStructuredPayload(candidate);
-      if (extracted) return extracted;
+      if (extracted) {
+        console.warn("[SearchRoomsWidget] Structured payload extracted from bridge.");
+        return extracted;
+      }
     }
+    console.warn("[SearchRoomsWidget] Structured payload extraction failed.");
     return null;
   }, []);
 
@@ -259,6 +338,7 @@ export function SearchRoomsWidget() {
 
     let cancelled = false;
     let attempts = 0;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const pollBridge = async () => {
       if (cancelled) return;
@@ -273,16 +353,30 @@ export function SearchRoomsWidget() {
 
       attempts += 1;
       if (attempts < MAX_BRIDGE_ATTEMPTS) {
-        setTimeout(pollBridge, BRIDGE_POLL_INTERVAL_MS);
+        timeoutId = setTimeout(pollBridge, BRIDGE_POLL_INTERVAL_MS);
       } else {
         setLoading(false);
       }
     };
 
+    const onMessage = (event: MessageEvent) => {
+      if (cancelled) return;
+      const extracted = extractStructuredPayload(event.data);
+      if (!extracted) return;
+      setPayload(extracted);
+      setLoading(false);
+      console.warn("[SearchRoomsWidget] Structured payload received via postMessage.");
+    };
+
+    window.addEventListener("message", onMessage);
     pollBridge();
 
     return () => {
       cancelled = true;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      window.removeEventListener("message", onMessage);
     };
   }, [loadBridgePayload, payload]);
 
