@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Monobook ChatGPT Widget</title>
+  </head>
+  <body>
+    <div id="monobook-widget-root"></div>
+    <script id="monobook-widget-bootstrap" type="application/json">
+      {
+        "widget": "search_rooms",
+        "payload": {
+          "property_id": "demo-property",
+          "property_name": "Sunset Beach Resort",
+          "count": 2,
+          "rooms": [
+            {
+              "id": "demo-room-1",
+              "property_id": "demo-property",
+              "name": "Garden Family Room",
+              "type": "Family Room",
+              "price_per_night": 195,
+              "max_guests": 4,
+              "amenities": ["WiFi", "Garden View", "Pool Access", "Breakfast"],
+              "images": []
+            },
+            {
+              "id": "demo-room-2",
+              "property_id": "demo-property",
+              "name": "Ocean View Deluxe Suite",
+              "type": "Deluxe Suite",
+              "price_per_night": 289,
+              "max_guests": 3,
+              "amenities": ["WiFi", "Ocean View", "Balcony", "King Bed", "Spa Access"],
+              "images": []
+            }
+          ]
+        }
+      }
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

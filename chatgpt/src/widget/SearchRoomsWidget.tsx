@@ -1,0 +1,347 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+import type {
+  OpenAIBridge,
+  SearchRoom,
+  SearchRoomsStructuredPayload,
+} from "../openai";
+
+const FALLBACK_GRADIENTS = [
+  "linear-gradient(145deg, #4f3324 0%, #6f4a34 40%, #8c6a50 100%)",
+  "linear-gradient(145deg, #085f6d 0%, #0e7a83 40%, #2aa7a0 100%)",
+  "linear-gradient(145deg, #4a5b2f 0%, #6c7e40 50%, #8e9a5a 100%)",
+  "linear-gradient(145deg, #5b5b5b 0%, #7a7a7a 50%, #a3a3a3 100%)",
+];
+
+const BRIDGE_METHODS = [
+  "getInitialState",
+  "getState",
+  "getContext",
+  "getToolOutput",
+] as const;
+
+const MAX_BRIDGE_ATTEMPTS = 40;
+const BRIDGE_POLL_INTERVAL_MS = 100;
+
+type BootstrapData = {
+  widget?: string;
+  payload?: unknown;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+const parseJson = (value: string | null): unknown => {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+};
+
+const hasSearchRoomsData = (value: Record<string, unknown>): boolean =>
+  Object.prototype.hasOwnProperty.call(value, "rooms") ||
+  Object.prototype.hasOwnProperty.call(value, "count") ||
+  Object.prototype.hasOwnProperty.call(value, "property_name") ||
+  Object.prototype.hasOwnProperty.call(value, "error");
+
+const extractStructuredPayload = (
+  payload: unknown
+): SearchRoomsStructuredPayload | null => {
+  if (!isRecord(payload)) return null;
+
+  const maybeStructured = payload.structuredContent;
+  if (isRecord(maybeStructured)) {
+    return maybeStructured as SearchRoomsStructuredPayload;
+  }
+
+  for (const key of ["result", "output"]) {
+    const nested = payload[key];
+    if (isRecord(nested)) {
+      const extracted = extractStructuredPayload(nested);
+      if (extracted) return extracted;
+    }
+  }
+
+  if (Array.isArray(payload.content)) {
+    for (const item of payload.content) {
+      if (!isRecord(item)) continue;
+      const text = item.text;
+      if (typeof text !== "string") continue;
+      const parsed = parseJson(text);
+      const extracted = extractStructuredPayload(parsed);
+      if (extracted) return extracted;
+    }
+  }
+
+  if (hasSearchRoomsData(payload)) {
+    return payload as SearchRoomsStructuredPayload;
+  }
+
+  return null;
+};
+
+const bootstrapPayloadFromScript = (): SearchRoomsStructuredPayload | null => {
+  const node = document.getElementById("monobook-widget-bootstrap");
+  const fromScript = parseJson(node?.textContent ?? null) as BootstrapData | null;
+  const query = new URLSearchParams(window.location.search);
+  const queryPayload = parseJson(query.get("payload"));
+
+  return (
+    extractStructuredPayload(fromScript?.payload) ??
+    extractStructuredPayload(queryPayload)
+  );
+};
+
+const formatPricePerNight = (value: string | number | undefined): string => {
+  const numeric = Number(value ?? 0);
+  if (Number.isFinite(numeric)) {
+    return `$${numeric.toLocaleString("en-US", { maximumFractionDigits: 0 })}/night`;
+  }
+  return "$0/night";
+};
+
+const splitAmenities = (
+  amenities: string[] | undefined
+): { primary: string[]; extraCount: number } => {
+  const normalized = (amenities ?? [])
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return {
+    primary: normalized.slice(0, 3),
+    extraCount: Math.max(normalized.length - 3, 0),
+  };
+};
+
+const resolveImageSource = (room: SearchRoom): string | null => {
+  const firstImage = room.images?.[0];
+  if (!firstImage) return null;
+  if (
+    firstImage.startsWith("http://") ||
+    firstImage.startsWith("https://") ||
+    firstImage.startsWith("/") ||
+    firstImage.startsWith("data:image/")
+  ) {
+    return firstImage;
+  }
+  return null;
+};
+
+type RoomCardProps = {
+  room: SearchRoom;
+  index: number;
+  selected: boolean;
+  onBookNow: (room: SearchRoom) => void;
+};
+
+function RoomCard({ room, index, selected, onBookNow }: RoomCardProps) {
+  const imageSrc = resolveImageSource(room);
+  const guestCount = room.max_guests && room.max_guests > 0 ? room.max_guests : "-";
+  const amenities = splitAmenities(room.amenities);
+  const fallbackBackground = FALLBACK_GRADIENTS[index % FALLBACK_GRADIENTS.length];
+
+  return (
+    <article className="room-card">
+      <div className="room-card__media">
+        {imageSrc ? (
+          <img className="room-card__image" src={imageSrc} alt={room.name} />
+        ) : (
+          <div
+            className="room-card__image room-card__image--fallback"
+            style={{ background: fallbackBackground }}
+            aria-label={room.name}
+          />
+        )}
+
+        <div className="room-card__guests" aria-label="Max guests">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+            <circle cx="8.5" cy="7" r="4" />
+            <path d="M20 8v6" />
+            <path d="M23 11h-6" />
+          </svg>
+          <span>{guestCount}</span>
+        </div>
+
+        <div className="room-card__price">{formatPricePerNight(room.price_per_night)}</div>
+      </div>
+
+      <div className="room-card__body">
+        <h3 className="room-card__title">{room.name}</h3>
+        <p className="room-card__type">{room.type ?? "Room"}</p>
+
+        <div className="room-card__amenities">
+          {amenities.primary.map((amenity) => (
+            <span key={`${room.id}-${amenity}`} className="chip">
+              {amenity}
+            </span>
+          ))}
+          {amenities.extraCount > 0 && <span className="chip">+{amenities.extraCount}</span>}
+        </div>
+
+        <button
+          type="button"
+          className={selected ? "book-button book-button--selected" : "book-button"}
+          onClick={() => onBookNow(room)}
+        >
+          Book now
+        </button>
+      </div>
+    </article>
+  );
+}
+
+export function SearchRoomsWidget() {
+  const [initialPayload] = useState<SearchRoomsStructuredPayload | null>(
+    () => bootstrapPayloadFromScript()
+  );
+  const [payload, setPayload] = useState<SearchRoomsStructuredPayload | null>(
+    initialPayload
+  );
+  const [loading, setLoading] = useState<boolean>(() => !initialPayload);
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
+
+  const loadBridgePayload = useCallback(async (): Promise<SearchRoomsStructuredPayload | null> => {
+    const bridge = window.openai as OpenAIBridge | undefined;
+    if (!bridge) return null;
+
+    const candidates: unknown[] = [bridge.toolOutput, bridge.output];
+    for (const methodName of BRIDGE_METHODS) {
+      const method = bridge[methodName];
+      if (typeof method !== "function") continue;
+      try {
+        candidates.push(await method.call(bridge));
+      } catch {
+        // Bridge methods can be absent/fail depending on host lifecycle.
+      }
+    }
+
+    for (const candidate of candidates) {
+      const extracted = extractStructuredPayload(candidate);
+      if (extracted) return extracted;
+    }
+    return null;
+  }, []);
+
+  useEffect(() => {
+    if (payload) {
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    let attempts = 0;
+
+    const pollBridge = async () => {
+      if (cancelled) return;
+      const extracted = await loadBridgePayload();
+      if (cancelled) return;
+
+      if (extracted) {
+        setPayload(extracted);
+        setLoading(false);
+        return;
+      }
+
+      attempts += 1;
+      if (attempts < MAX_BRIDGE_ATTEMPTS) {
+        setTimeout(pollBridge, BRIDGE_POLL_INTERVAL_MS);
+      } else {
+        setLoading(false);
+      }
+    };
+
+    pollBridge();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadBridgePayload, payload]);
+
+  const rooms = useMemo(() => payload?.rooms ?? [], [payload]);
+  const count = typeof payload?.count === "number" ? payload.count : rooms.length;
+  const propertyName =
+    payload?.property_name?.trim() || "Selected property";
+
+  const onBookNow = useCallback(
+    (room: SearchRoom) => {
+      setSelectedRoomId(room.id);
+      const detail = {
+        room_id: room.id,
+        room_name: room.name,
+        property_id: room.property_id ?? payload?.property_id ?? null,
+      };
+
+      window.dispatchEvent(
+        new CustomEvent("monobook:room-select", { detail })
+      );
+      try {
+        window.parent?.postMessage(
+          { type: "monobook.room_select", detail },
+          "*"
+        );
+      } catch {
+        // Keep UI responsive even if parent messaging is unavailable.
+      }
+    },
+    [payload?.property_id]
+  );
+
+  return (
+    <main className="rooms-widget">
+      <div className="rooms-widget__content">
+        {loading && (
+          <>
+            <div className="skeleton skeleton--title" />
+            <div className="rooms-grid">
+              <div className="skeleton skeleton--card" />
+              <div className="skeleton skeleton--card" />
+            </div>
+          </>
+        )}
+
+        {!loading && payload?.error && (
+          <div className="widget-alert" role="alert">
+            {payload.error}
+          </div>
+        )}
+
+        {!loading && !payload?.error && (
+          <>
+            <h2 className="rooms-widget__title">
+              {count} rooms at {propertyName}
+            </h2>
+
+            {rooms.length === 0 ? (
+              <p className="rooms-widget__empty">
+                No rooms found for these filters.
+              </p>
+            ) : (
+              <div className="rooms-grid">
+                {rooms.map((room, index) => (
+                  <RoomCard
+                    key={room.id}
+                    room={room}
+                    index={index}
+                    selected={selectedRoomId === room.id}
+                    onBookNow={onBookNow}
+                  />
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </main>
+  );
+}
