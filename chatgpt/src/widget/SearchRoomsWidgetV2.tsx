@@ -156,12 +156,43 @@ const bootstrapPayloadFromScript = (): SearchRoomsStructuredPayload | null => {
   );
 };
 
-const formatPrice = (value: string | number | undefined): string => {
+const isPrefixCurrencyDisplay = (currencyDisplay: string): boolean => {
+  return !/[A-Za-z]/.test(currencyDisplay);
+};
+
+const resolveCurrencyDisplay = (
+  currencyDisplay: string | undefined,
+  currencyCode: string | undefined
+): string => {
+  const normalizedDisplay = currencyDisplay?.trim();
+  if (normalizedDisplay) return normalizedDisplay;
+  const normalizedCode = currencyCode?.trim().toUpperCase();
+  if (!normalizedCode) return "$";
+  if (normalizedCode === "USD") return "$";
+  return normalizedCode;
+};
+
+const formatPrice = (
+  value: string | number | undefined,
+  currencyDisplay: string | undefined,
+  currencyCode: string | undefined
+): string => {
   const numeric = Number(value ?? 0);
+  const resolvedCurrencyDisplay = resolveCurrencyDisplay(
+    currencyDisplay,
+    currencyCode
+  );
   if (Number.isFinite(numeric)) {
-    return `$${numeric.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+    const amount = numeric.toLocaleString("en-US", { maximumFractionDigits: 0 });
+    if (isPrefixCurrencyDisplay(resolvedCurrencyDisplay)) {
+      return `${resolvedCurrencyDisplay}${amount}`;
+    }
+    return `${amount} ${resolvedCurrencyDisplay}`;
   }
-  return "$0";
+  if (isPrefixCurrencyDisplay(resolvedCurrencyDisplay)) {
+    return `${resolvedCurrencyDisplay}0`;
+  }
+  return `0 ${resolvedCurrencyDisplay}`;
 };
 
 const resolveImageSource = (room: SearchRoom): string | null => {
@@ -268,7 +299,13 @@ function RoomCardV2({ room, index, selected, subtitle, onBookNow }: RoomCardV2Pr
         </div>
 
         <div className="room-card-v2__actions">
-          <span className="room-card-v2__price">{formatPrice(room.price_per_night)}</span>
+          <span className="room-card-v2__price">
+            {formatPrice(
+              room.price_per_night,
+              room.currency_display,
+              room.currency_code
+            )}
+          </span>
           <button
             type="button"
             className={

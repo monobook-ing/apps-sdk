@@ -156,12 +156,51 @@ const bootstrapPayloadFromScript = (): SearchRoomsStructuredPayload | null => {
   );
 };
 
-const formatPricePerNight = (value: string | number | undefined): string => {
+const isPrefixCurrencyDisplay = (currencyDisplay: string): boolean => {
+  return !/[A-Za-z]/.test(currencyDisplay);
+};
+
+const resolveCurrencyDisplay = (
+  currencyDisplay: string | undefined,
+  currencyCode: string | undefined
+): string => {
+  const normalizedDisplay = currencyDisplay?.trim();
+  if (normalizedDisplay) return normalizedDisplay;
+  const normalizedCode = currencyCode?.trim().toUpperCase();
+  if (!normalizedCode) return "$";
+  if (normalizedCode === "USD") return "$";
+  return normalizedCode;
+};
+
+const formatPricePerNight = (
+  value: string | number | undefined,
+  currencyDisplay: string | undefined,
+  currencyCode: string | undefined
+): string => {
+  const numeric = Number(value ?? 0);
+  const resolvedCurrencyDisplay = resolveCurrencyDisplay(
+    currencyDisplay,
+    currencyCode
+  );
+  const amount = Number.isFinite(numeric)
+    ? numeric.toLocaleString("en-US", { maximumFractionDigits: 0 })
+    : "0";
+  if (isPrefixCurrencyDisplay(resolvedCurrencyDisplay)) {
+    return `${resolvedCurrencyDisplay}${amount}/night`;
+  }
+  return `${amount} ${resolvedCurrencyDisplay}/night`;
+};
+
+const formatPriceLabel = (
+  value: string | number | undefined,
+  currencyDisplay: string | undefined,
+  currencyCode: string | undefined
+): string => {
   const numeric = Number(value ?? 0);
   if (Number.isFinite(numeric)) {
-    return `$${numeric.toLocaleString("en-US", { maximumFractionDigits: 0 })}/night`;
+    return formatPricePerNight(value, currencyDisplay, currencyCode);
   }
-  return "$0/night";
+  return formatPricePerNight(0, currencyDisplay, currencyCode);
 };
 
 const splitAmenities = (
@@ -235,7 +274,13 @@ function RoomCard({ room, index, selected, onBookNow }: RoomCardProps) {
           <span>{guestCount}</span>
         </div>
 
-        <div className="room-card__price">{formatPricePerNight(room.price_per_night)}</div>
+        <div className="room-card__price">
+          {formatPriceLabel(
+            room.price_per_night,
+            room.currency_display,
+            room.currency_code
+          )}
+        </div>
       </div>
 
       <div className="room-card__body">
