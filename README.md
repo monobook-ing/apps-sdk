@@ -6,7 +6,12 @@
 
 Path: `apps-sdk/chatgpt`
 
-This project builds a dedicated `search_rooms` widget component (cards + `Book now`) that reads MCP `structuredContent` and renders UI inside:
+This project builds the ChatGPT search widget runtime used by both MCP tools:
+
+- `search_hotels`
+- `search_rooms`
+
+The current runtime renders `SearchRoomsWidgetV2` (dark overlay card design + `Reserve Now`) from MCP `structuredContent` inside:
 
 - `#monobook-widget-root`
 - bootstrap script: `#monobook-widget-bootstrap`
@@ -24,19 +29,21 @@ Build output:
 - `apps-sdk/chatgpt/dist/apps/chatgpt-widget.js`
 - `apps-sdk/chatgpt/dist/apps/chatgpt-widget.css`
 
-Deploy these two assets to your Vercel static host.
+Treat these two files as the canonical release artifact for search widget UI.
 
 ## API environment
 
-Point API to the widget domain:
-
-```env
-CHATGPT_WIDGET_BASE_URL=https://your-widget-domain.vercel.app
-```
-
-or explicit URLs:
+Use explicit asset URLs (recommended):
 
 ```env
 CHATGPT_WIDGET_JS_URL=https://your-widget-domain.vercel.app/apps/chatgpt-widget.js
 CHATGPT_WIDGET_CSS_URL=https://your-widget-domain.vercel.app/apps/chatgpt-widget.css
 ```
+
+`CHATGPT_WIDGET_BASE_URL` remains supported as a legacy fallback.
+
+## Deploy order
+
+1. Build `apps-sdk/chatgpt`.
+2. Deploy `chatgpt-widget.js` and `chatgpt-widget.css`.
+3. Ensure API points to those exact URLs via `CHATGPT_WIDGET_JS_URL` and `CHATGPT_WIDGET_CSS_URL`.
