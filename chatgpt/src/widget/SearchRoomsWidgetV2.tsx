@@ -503,16 +503,37 @@ export function SearchRoomsWidgetV2() {
   }, [payload?.hotels, payload?.property_name]);
 
   const onBookNow = useCallback(
-    (room: SearchRoom) => {
+    async (room: SearchRoom) => {
       setSelectedRoomId(room.id);
+
+      const propertyId =
+        room.property_id ??
+        payload?.property_id ??
+        payload?.hotels?.[0]?.property_id ??
+        null;
+
+      // Call create_booking via the OpenAI bridge when available
+      const bridge = window.openai;
+      if (bridge?.callTool) {
+        try {
+          await bridge.callTool("create_booking", {
+            property_id: propertyId,
+            room_id: room.id,
+            guest_name: "Guest",
+            check_in: payload?.check_in ?? "",
+            check_out: payload?.check_out ?? "",
+            guests: payload?.guests ?? 2,
+          });
+        } catch {
+          // Fall through to event dispatching
+        }
+      }
+
+      // Keep event dispatching as fallback for non-ChatGPT contexts
       const detail = {
         room_id: room.id,
         room_name: room.name,
-        property_id:
-          room.property_id ??
-          payload?.property_id ??
-          payload?.hotels?.[0]?.property_id ??
-          null,
+        property_id: propertyId,
       };
 
       window.dispatchEvent(
@@ -527,7 +548,7 @@ export function SearchRoomsWidgetV2() {
         // Keep UI responsive even if parent messaging is unavailable.
       }
     },
-    [payload?.hotels, payload?.property_id]
+    [payload]
   );
 
   return (

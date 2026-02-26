@@ -32,6 +32,9 @@ export type SearchRoomsStructuredPayload = {
   count?: number;
   count_hotels?: number;
   count_rooms?: number;
+  check_in?: string;
+  check_out?: string;
+  guests?: number;
   message?: string;
   error?: string;
 };
