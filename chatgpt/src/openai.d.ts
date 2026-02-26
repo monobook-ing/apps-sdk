@@ -36,6 +36,36 @@ export type SearchRoomsStructuredPayload = {
   error?: string;
 };
 
+export type BookingPayload = {
+  booking_id?: string;
+  status?: string;
+  guest_name?: string;
+  guests?: number;
+  room_id?: string;
+  room_name?: string;
+  room_type?: string;
+  room_description?: string;
+  room_images?: string[];
+  amenities?: string[];
+  max_guests?: number;
+  bed_config?: string;
+  property_id?: string;
+  property_name?: string;
+  check_in?: string;
+  check_out?: string;
+  nights?: number;
+  nightly_rate?: number;
+  subtotal?: number;
+  taxes?: number;
+  service_fee?: number;
+  total?: number;
+  currency?: string;
+  currency_code?: string;
+  currency_display?: string;
+  message?: string;
+  error?: string;
+};
+
 export type OpenAIBridge = {
   callTool?: (name: string, args?: Record<string, unknown>) => Promise<unknown>;
   getInitialState?: () => Promise<unknown> | unknown;
