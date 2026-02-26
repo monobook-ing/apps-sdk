@@ -25,8 +25,10 @@ const BRIDGE_STATIC_KEYS = [
   "value",
 ] as const;
 
-const MAX_BRIDGE_ATTEMPTS = 80;
-const BRIDGE_POLL_INTERVAL_MS = 100;
+const MAX_BRIDGE_ATTEMPTS_FAST = 100;
+const BRIDGE_POLL_INTERVAL_FAST = 100;
+const MAX_BRIDGE_ATTEMPTS_SLOW = 40;
+const BRIDGE_POLL_INTERVAL_SLOW = 500;
 
 type BootstrapData = {
   widget?: string;
@@ -409,8 +411,13 @@ export function BookingCardWidget() {
       }
 
       attempts += 1;
-      if (attempts < MAX_BRIDGE_ATTEMPTS) {
-        timeoutId = setTimeout(pollBridge, BRIDGE_POLL_INTERVAL_MS);
+      if (attempts < MAX_BRIDGE_ATTEMPTS_FAST) {
+        timeoutId = setTimeout(pollBridge, BRIDGE_POLL_INTERVAL_FAST);
+      } else if (
+        attempts <
+        MAX_BRIDGE_ATTEMPTS_FAST + MAX_BRIDGE_ATTEMPTS_SLOW
+      ) {
+        timeoutId = setTimeout(pollBridge, BRIDGE_POLL_INTERVAL_SLOW);
       } else {
         setLoading(false);
       }

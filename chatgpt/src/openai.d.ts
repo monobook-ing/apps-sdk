@@ -35,6 +35,12 @@ export type SearchRoomsStructuredPayload = {
   check_in?: string;
   check_out?: string;
   guests?: number;
+  applied_filters?: {
+    check_in?: string;
+    check_out?: string;
+    guests?: number;
+    [key: string]: unknown;
+  };
   message?: string;
   error?: string;
 };

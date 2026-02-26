@@ -34,8 +34,12 @@ const BRIDGE_STATIC_KEYS = [
   "value",
 ] as const;
 
-const MAX_BRIDGE_ATTEMPTS = 80;
-const BRIDGE_POLL_INTERVAL_MS = 100;
+const MAX_BRIDGE_ATTEMPTS_FAST = 100;
+const BRIDGE_POLL_INTERVAL_FAST = 100;
+const MAX_BRIDGE_ATTEMPTS_SLOW = 40;
+const BRIDGE_POLL_INTERVAL_SLOW = 500;
+
+let bridgeMessageId = 0;
 
 type BootstrapData = {
   widget?: string;
@@ -233,6 +237,31 @@ const resolveArea = (room: SearchRoom): string => {
   return "N/A";
 };
 
+const callToolWithFallback = async (
+  toolName: string,
+  args: Record<string, unknown>
+): Promise<unknown> => {
+  const bridge = window.openai;
+  if (bridge?.callTool) {
+    return bridge.callTool(toolName, args);
+  }
+
+  const message = {
+    jsonrpc: "2.0" as const,
+    method: "tools/call",
+    params: { name: toolName, arguments: args },
+    id: ++bridgeMessageId,
+  };
+
+  try {
+    window.parent.postMessage(JSON.stringify(message), "*");
+  } catch {
+    // Ignore postMessage errors outside iframe contexts.
+  }
+
+  return message.id;
+};
+
 type RoomCardV2Props = {
   room: SearchRoom;
   index: number;
@@ -412,8 +441,13 @@ export function SearchRoomsWidgetV2() {
       }
 
       attempts += 1;
-      if (attempts < MAX_BRIDGE_ATTEMPTS) {
-        timeoutId = setTimeout(pollBridge, BRIDGE_POLL_INTERVAL_MS);
+      if (attempts < MAX_BRIDGE_ATTEMPTS_FAST) {
+        timeoutId = setTimeout(pollBridge, BRIDGE_POLL_INTERVAL_FAST);
+      } else if (
+        attempts <
+        MAX_BRIDGE_ATTEMPTS_FAST + MAX_BRIDGE_ATTEMPTS_SLOW
+      ) {
+        timeoutId = setTimeout(pollBridge, BRIDGE_POLL_INTERVAL_SLOW);
       } else {
         setLoading(false);
       }
@@ -511,22 +545,21 @@ export function SearchRoomsWidgetV2() {
         payload?.property_id ??
         payload?.hotels?.[0]?.property_id ??
         null;
+      const checkIn = payload?.check_in ?? payload?.applied_filters?.check_in ?? "";
+      const checkOut = payload?.check_out ?? payload?.applied_filters?.check_out ?? "";
+      const guests = payload?.guests ?? payload?.applied_filters?.guests ?? 2;
 
-      // Call create_booking via the OpenAI bridge when available
-      const bridge = window.openai;
-      if (bridge?.callTool) {
-        try {
-          await bridge.callTool("create_booking", {
-            property_id: propertyId,
-            room_id: room.id,
-            guest_name: "Guest",
-            check_in: payload?.check_in ?? "",
-            check_out: payload?.check_out ?? "",
-            guests: payload?.guests ?? 2,
-          });
-        } catch {
-          // Fall through to event dispatching
-        }
+      try {
+        await callToolWithFallback("create_booking", {
+          property_id: propertyId,
+          room_id: room.id,
+          guest_name: "Guest",
+          check_in: checkIn,
+          check_out: checkOut,
+          guests,
+        });
+      } catch (error) {
+        console.error("[SearchRoomsWidgetV2] callTool failed:", error);
       }
 
       // Keep event dispatching as fallback for non-ChatGPT contexts
